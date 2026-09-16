@@ -1,3 +1,65 @@
+name: Build WSTunnel Debian 10
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    container:
+      image: debian:buster
+
+    steps:
+      - name: Fix Debian 10 repositories
+        run: |
+          cat > /etc/apt/sources.list <<'EOF'
+          deb http://archive.debian.org/debian buster main contrib non-free
+          deb http://archive.debian.org/debian-security buster/updates main contrib non-free
+          EOF
+
+          cat > /etc/apt/apt.conf.d/99archive <<'EOF'
+          Acquire::Check-Valid-Until "false";
+          Acquire::AllowInsecureRepositories "true";
+          EOF
+
+          apt-get update
+
+      - name: Install dependencies
+        run: |
+          apt-get install -y \
+            ca-certificates \
+            curl \
+            git \
+            gcc \
+            libc6-dev \
+            file \
+            tar
+
+      - name: Install Go
+        run: |
+          curl -L \
+            https://go.dev/dl/go1.25.7.linux-amd64.tar.gz \
+            -o /tmp/go.tar.gz
+
+          rm -rf /usr/local/go
+          tar -C /usr/local -xzf /tmp/go.tar.gz
+
+          /usr/local/go/bin/go version
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git in container
+        run: |
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git status || true
+
       - name: Build WSTunnel for Debian 10 amd64
         env:
           PATH: /usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
@@ -9,14 +71,15 @@
           echo "===== Go ====="
           go version
 
-          echo "===== Repository ====="
+          echo "===== Source ====="
           pwd
           ls -la
 
-          echo "===== Build ====="
-          mkdir -p build
-
+          echo "===== Dependencies ====="
           go mod download
+
+          echo "===== Building ====="
+          mkdir -p build
 
           go build \
             -buildvcs=false \
@@ -25,10 +88,17 @@
             -o build/wstunnel \
             cli.go
 
-          echo "===== Result ====="
+          echo "===== Binary ====="
           file build/wstunnel
           ls -lh build/wstunnel
           sha256sum build/wstunnel
 
-          echo "===== CLI ====="
+          echo "===== CLI options ====="
           ./build/wstunnel --help
+
+      - name: Upload Debian 10 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: wstunnel-debian10-amd64
+          path: build/wstunnel
+          if-no-files-found: error
