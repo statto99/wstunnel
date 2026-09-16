@@ -7,16 +7,27 @@ on:
       - main
 
 jobs:
-  build-debian10:
+  build:
     runs-on: ubuntu-latest
 
     container:
       image: debian:buster
 
     steps:
-      - name: Install build dependencies
+      - name: Fix Debian 10 archive repositories
         run: |
+          cat > /etc/apt/sources.list <<'EOF'
+          deb http://archive.debian.org/debian buster main contrib non-free
+          deb http://archive.debian.org/debian-security buster/updates main contrib non-free
+          EOF
+
+          printf 'Acquire::Check-Valid-Until "false";\n' \
+            > /etc/apt/apt.conf.d/99archive
+
           apt-get update
+
+      - name: Install dependencies
+        run: |
           apt-get install -y \
             ca-certificates \
             curl \
@@ -26,7 +37,7 @@ jobs:
             file \
             tar
 
-      - name: Install Go 1.25.7
+      - name: Install Go
         run: |
           curl -L \
             https://go.dev/dl/go1.25.7.linux-amd64.tar.gz \
@@ -37,10 +48,10 @@ jobs:
 
           /usr/local/go/bin/go version
 
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build Debian 10 amd64 binary
+      - name: Build
         env:
           PATH: /usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
           GOOS: linux
@@ -48,37 +59,34 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           chmod +x build_desktop.sh
-
           ./build_desktop.sh
 
-          echo "===== Build output ====="
-          find . -maxdepth 3 -type f -exec file {} \; \
-            | grep -E 'ELF.*x86-64' || true
+          echo "===== ELF binaries ====="
+          find . -type f -exec file {} \; | grep 'ELF.*x86-64' || true
 
       - name: Collect binary
         run: |
           mkdir -p artifact
 
-          BIN="$(find . -maxdepth 3 -type f -exec file {} \; \
+          BIN="$(find . -type f -exec file {} \; \
             | grep 'ELF.*x86-64' \
             | head -1 \
             | cut -d: -f1)"
 
           if [ -z "$BIN" ]; then
-            echo "ERROR: WSTunnel binary not found"
+            echo "ERROR: binary not found"
             exit 1
           fi
 
-          echo "Found binary: $BIN"
+          echo "Using: $BIN"
 
           cp "$BIN" artifact/wstunnel
-
           chmod +x artifact/wstunnel
 
           file artifact/wstunnel
           sha256sum artifact/wstunnel
 
-      - name: Upload Debian 10 binary
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: wstunnel-debian10-amd64
