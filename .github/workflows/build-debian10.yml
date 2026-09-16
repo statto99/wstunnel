@@ -1,94 +1,34 @@
-name: Build WSTunnel Debian 10
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    container:
-      image: debian:buster
-
-    steps:
-      - name: Fix Debian 10 archive repositories
-        run: |
-          cat > /etc/apt/sources.list <<'EOF'
-          deb http://archive.debian.org/debian buster main contrib non-free
-          deb http://archive.debian.org/debian-security buster/updates main contrib non-free
-          EOF
-
-          printf 'Acquire::Check-Valid-Until "false";\n' \
-            > /etc/apt/apt.conf.d/99archive
-
-          apt-get update
-
-      - name: Install dependencies
-        run: |
-          apt-get install -y \
-            ca-certificates \
-            curl \
-            git \
-            gcc \
-            libc6-dev \
-            file \
-            tar
-
-      - name: Install Go
-        run: |
-          curl -L \
-            https://go.dev/dl/go1.25.7.linux-amd64.tar.gz \
-            -o /tmp/go.tar.gz
-
-          rm -rf /usr/local/go
-          tar -C /usr/local -xzf /tmp/go.tar.gz
-
-          /usr/local/go/bin/go version
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build
+      - name: Build WSTunnel for Debian 10 amd64
         env:
           PATH: /usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
           GOOS: linux
           GOARCH: amd64
           CGO_ENABLED: "0"
+          GOFLAGS: "-buildvcs=false"
         run: |
-          chmod +x build_desktop.sh
-          ./build_desktop.sh
+          echo "===== Go ====="
+          go version
 
-          echo "===== ELF binaries ====="
-          find . -type f -exec file {} \; | grep 'ELF.*x86-64' || true
+          echo "===== Repository ====="
+          pwd
+          ls -la
 
-      - name: Collect binary
-        run: |
-          mkdir -p artifact
+          echo "===== Build ====="
+          mkdir -p build
 
-          BIN="$(find . -type f -exec file {} \; \
-            | grep 'ELF.*x86-64' \
-            | head -1 \
-            | cut -d: -f1)"
+          go mod download
 
-          if [ -z "$BIN" ]; then
-            echo "ERROR: binary not found"
-            exit 1
-          fi
+          go build \
+            -buildvcs=false \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o build/wstunnel \
+            cli.go
 
-          echo "Using: $BIN"
+          echo "===== Result ====="
+          file build/wstunnel
+          ls -lh build/wstunnel
+          sha256sum build/wstunnel
 
-          cp "$BIN" artifact/wstunnel
-          chmod +x artifact/wstunnel
-
-          file artifact/wstunnel
-          sha256sum artifact/wstunnel
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: wstunnel-debian10-amd64
-          path: artifact/wstunnel
-          if-no-files-found: error
+          echo "===== CLI ====="
+          ./build/wstunnel --help
