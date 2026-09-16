@@ -1,0 +1,86 @@
+name: Build WSTunnel Debian 10
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-debian10:
+    runs-on: ubuntu-latest
+
+    container:
+      image: debian:buster
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            ca-certificates \
+            curl \
+            git \
+            gcc \
+            libc6-dev \
+            file \
+            tar
+
+      - name: Install Go 1.25.7
+        run: |
+          curl -L \
+            https://go.dev/dl/go1.25.7.linux-amd64.tar.gz \
+            -o /tmp/go.tar.gz
+
+          rm -rf /usr/local/go
+          tar -C /usr/local -xzf /tmp/go.tar.gz
+
+          /usr/local/go/bin/go version
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Debian 10 amd64 binary
+        env:
+          PATH: /usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          chmod +x build_desktop.sh
+
+          ./build_desktop.sh
+
+          echo "===== Build output ====="
+          find . -maxdepth 3 -type f -exec file {} \; \
+            | grep -E 'ELF.*x86-64' || true
+
+      - name: Collect binary
+        run: |
+          mkdir -p artifact
+
+          BIN="$(find . -maxdepth 3 -type f -exec file {} \; \
+            | grep 'ELF.*x86-64' \
+            | head -1 \
+            | cut -d: -f1)"
+
+          if [ -z "$BIN" ]; then
+            echo "ERROR: WSTunnel binary not found"
+            exit 1
+          fi
+
+          echo "Found binary: $BIN"
+
+          cp "$BIN" artifact/wstunnel
+
+          chmod +x artifact/wstunnel
+
+          file artifact/wstunnel
+          sha256sum artifact/wstunnel
+
+      - name: Upload Debian 10 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: wstunnel-debian10-amd64
+          path: artifact/wstunnel
+          if-no-files-found: error
