@@ -1,4 +1,4 @@
-name: Build WSTunnel Debian 10
+name: Build WSTunnel Multi-Platform
 
 on:
   workflow_dispatch:
@@ -14,7 +14,10 @@ jobs:
       image: debian:buster
 
     steps:
-      - name: Fix Debian 10 repositories
+      # ----------------------------------------------------------
+      # Debian 10/Buster is archived
+      # ----------------------------------------------------------
+      - name: Configure Debian 10 archive repositories
         run: |
           cat > /etc/apt/sources.list <<'EOF'
           deb http://archive.debian.org/debian buster main contrib non-free
@@ -28,6 +31,9 @@ jobs:
 
           apt-get update
 
+      # ----------------------------------------------------------
+      # Dependencies
+      # ----------------------------------------------------------
       - name: Install dependencies
         run: |
           apt-get install -y \
@@ -39,6 +45,9 @@ jobs:
             file \
             tar
 
+      # ----------------------------------------------------------
+      # Go
+      # ----------------------------------------------------------
       - name: Install Go
         run: |
           curl -L \
@@ -50,55 +59,186 @@ jobs:
 
           /usr/local/go/bin/go version
 
-      - name: Checkout
+      # ----------------------------------------------------------
+      # Checkout
+      # ----------------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configure Git in container
+      - name: Configure Git
         run: |
           git config --system --add safe.directory "$GITHUB_WORKSPACE"
           git status || true
 
-      - name: Build WSTunnel for Debian 10 amd64
+      # ----------------------------------------------------------
+      # Dependencies
+      # ----------------------------------------------------------
+      - name: Download Go dependencies
         env:
           PATH: /usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
-          GOOS: linux
-          GOARCH: amd64
+          GOFLAGS: "-buildvcs=false"
+        run: |
+          go mod download
+
+      # ----------------------------------------------------------
+      # Build
+      # ----------------------------------------------------------
+      - name: Build all platforms
+        env:
+          PATH: /usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
           CGO_ENABLED: "0"
           GOFLAGS: "-buildvcs=false"
         run: |
-          echo "===== Go ====="
-          go version
+          set -e
 
-          echo "===== Source ====="
-          pwd
-          ls -la
-
-          echo "===== Dependencies ====="
-          go mod download
-
-          echo "===== Building ====="
           mkdir -p build
 
+          echo
+          echo "========================================"
+          echo " Debian 9.11 AMD64"
+          echo "========================================"
+
+          GOOS=linux GOARCH=amd64 GOAMD64=v1 \
           go build \
             -buildvcs=false \
             -trimpath \
             -ldflags="-s -w" \
-            -o build/wstunnel \
+            -o build/wstunnel-debian9.11-amd64 \
             cli.go
 
-          echo "===== Binary ====="
-          file build/wstunnel
-          ls -lh build/wstunnel
-          sha256sum build/wstunnel
 
-          echo "===== CLI options ====="
-          ./build/wstunnel --help
+          echo
+          echo "========================================"
+          echo " Debian 10 AMD64"
+          echo "========================================"
 
-      - name: Upload Debian 10 binary
+          GOOS=linux GOARCH=amd64 GOAMD64=v1 \
+          go build \
+            -buildvcs=false \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o build/wstunnel-debian10-amd64 \
+            cli.go
+
+
+          echo
+          echo "========================================"
+          echo " Debian 12 AArch64"
+          echo "========================================"
+
+          GOOS=linux GOARCH=arm64 \
+          go build \
+            -buildvcs=false \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o build/wstunnel-debian12-aarch64 \
+            cli.go
+
+
+          echo
+          echo "========================================"
+          echo " Windows AMD64"
+          echo "========================================"
+
+          GOOS=windows GOARCH=amd64 GOAMD64=v1 \
+          go build \
+            -buildvcs=false \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o build/wstunnel-windows-amd64.exe \
+            cli.go
+
+
+          echo
+          echo "========================================"
+          echo " Windows ARM64"
+          echo "========================================"
+
+          GOOS=windows GOARCH=arm64 \
+          go build \
+            -buildvcs=false \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o build/wstunnel-windows-arm64.exe \
+            cli.go
+
+
+          echo
+          echo "========================================"
+          echo " Build results"
+          echo "========================================"
+
+          ls -lh build/
+
+          echo
+          echo "File types:"
+          file build/*
+
+          echo
+          echo "SHA256:"
+          sha256sum build/*
+
+      # ----------------------------------------------------------
+      # Test native Linux AMD64 build
+      # ----------------------------------------------------------
+      - name: Test Linux AMD64 binary
+        run: |
+          chmod +x build/wstunnel-debian9.11-amd64
+
+          echo "===== WSTunnel CLI ====="
+          ./build/wstunnel-debian9.11-amd64 --help
+
+      # ----------------------------------------------------------
+      # Individual artifacts
+      # ----------------------------------------------------------
+      - name: Upload Debian 9.11 AMD64
+        uses: actions/upload-artifact@v4
+        with:
+          name: wstunnel-debian9.11-amd64
+          path: build/wstunnel-debian9.11-amd64
+          if-no-files-found: error
+
+      - name: Upload Debian 10 AMD64
         uses: actions/upload-artifact@v4
         with:
           name: wstunnel-debian10-amd64
-          path: build/wstunnel
+          path: build/wstunnel-debian10-amd64
+          if-no-files-found: error
+
+      - name: Upload Debian 12 AArch64
+        uses: actions/upload-artifact@v4
+        with:
+          name: wstunnel-debian12-aarch64
+          path: build/wstunnel-debian12-aarch64
+          if-no-files-found: error
+
+      - name: Upload Windows AMD64
+        uses: actions/upload-artifact@v4
+        with:
+          name: wstunnel-windows-amd64
+          path: build/wstunnel-windows-amd64.exe
+          if-no-files-found: error
+
+      - name: Upload Windows ARM64
+        uses: actions/upload-artifact@v4
+        with:
+          name: wstunnel-windows-arm64
+          path: build/wstunnel-windows-arm64.exe
+          if-no-files-found: error
+
+      # ----------------------------------------------------------
+      # Everything together
+      # ----------------------------------------------------------
+      - name: Upload complete WSTunnel package
+        uses: actions/upload-artifact@v4
+        with:
+          name: wstunnel-all-platforms
+          path: |
+            build/wstunnel-debian9.11-amd64
+            build/wstunnel-debian10-amd64
+            build/wstunnel-debian12-aarch64
+            build/wstunnel-windows-amd64.exe
+            build/wstunnel-windows-arm64.exe
           if-no-files-found: error
